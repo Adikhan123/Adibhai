@@ -44,23 +44,23 @@ from pyrogram.errors import (
 # ---------------------------------------------------------------------
 
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8543596764:AAEs9_r-ZxteVct-7M1VsjhEQmiFAhrs5_Y')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '7582601826'))
+ADMIN_ID = int(os.getenv('ADMIN_ID', '8481215632'))
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb+srv://userbot:userbot@cluster0.iweqz.mongodb.net/test?retryWrites=true&w=majority')
-API_ID = int(os.getenv('API_ID', '30038466'))
-API_HASH = os.getenv('API_HASH', '5a492a0dfb22b1a0b7caacbf90cbf96e')
+API_ID = int(os.getenv('API_ID', '36330071'))
+API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
 
 # MUST JOIN CHANNELS - TWO CHANNELS
-MUST_JOIN_CHANNEL_1 = "@BOT_HEART"
-MUST_JOIN_CHANNEL_2 = "@BOT_HEART2"
+MUST_JOIN_CHANNEL_1 = "@TmOtpSell_Channel"
+MUST_JOIN_CHANNEL_2 = "@TmStocks_Support"
 # LOG CHANNEL
-LOG_CHANNEL_ID = "-1002130890437"
+LOG_CHANNEL_ID = "-1003889454152"
 
 # Referral commission percentage
 REFERRAL_COMMISSION = 1.5
 
 # Global API Credentials for Pyrogram Login
-GLOBAL_API_ID = 6435225
-GLOBAL_API_HASH = "4e984ea35f854762dcde906dce426c2d"
+GLOBAL_API_ID = 36330071
+GLOBAL_API_HASH = "7cf95f082395bcf3d2e7c4a4a27f3ef5"
 
 # ---------------------------------------------------------------------
 # INIT
