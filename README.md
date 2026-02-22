@@ -1,4 +1,4 @@
-# 🤖 OTP Bot by Xqueen
+# 🤖 OTP Bot by Notty Adi
 
 Telegram OTP Bot with:
 - Account selling
