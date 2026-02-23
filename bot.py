@@ -518,7 +518,7 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
         
         # Main menu caption with expandable blockquotes
         caption = (
-            "🥂 <b>Welcome To Otp Bot By ROCKY_P4PA</b> 🥂\n"
+            "🥂 <b>Welcome To Otp Bot By Notty Adi</b> 🥂\n"
             "<blockquote expandable>\n"
             "- Automatic OTPs 📍\n"
             "- Easy to Use 🥂🥂\n"
@@ -1042,7 +1042,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 start(call.message)
                 return
             
-            msg_text = "🛠️ Support: @ROCKY_P4PA"
+            msg_text = "🛠️ Support: @TmOtpSeller"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu"))
             
@@ -2615,7 +2615,7 @@ def process_recharge_amount(msg):
         caption = f"""<blockquote>💳 <b>UPI Payment Details</b> 
 
 💰 Amount: {format_currency(amount)}
-📱 UPI ID: Chandaliya@fam
+📱 UPI ID: adibhai@fam
 
 📋 Instructions:
 1. Scan QR code OR send {format_currency(amount)} to above UPI
@@ -2634,7 +2634,7 @@ def process_recharge_amount(msg):
         
         bot.send_photo(
             msg.chat.id,
-            "https://files.catbox.moe/q8l080.jpg",
+            "https://files.catbox.moe/g736td.jpg",
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup
