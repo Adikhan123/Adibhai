@@ -53,7 +53,7 @@ API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
 MUST_JOIN_CHANNEL_1 = "@TmOtpSell_Channel"
 MUST_JOIN_CHANNEL_2 = "@TmStocks_Support"
 # LOG CHANNEL
-LOG_CHANNEL_ID = "-1003889454152"
+LOG_CHANNEL_ID = "-1003705564695"
 
 # Referral commission percentage
 REFERRAL_COMMISSION = 1.5
