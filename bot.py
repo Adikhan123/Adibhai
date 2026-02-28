@@ -44,7 +44,7 @@ from pyrogram.errors import (
 # ---------------------------------------------------------------------
 
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8497264898:AAG5cRnVHZJUva_xZausUElI50BTG9wErAs')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '7757792835'))
+ADMIN_ID = int(os.getenv('ADMIN_ID', '8242451657'))
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
 API_ID = int(os.getenv('API_ID', '36330071'))
 API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
@@ -1049,7 +1049,7 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
         
         # Main menu caption with expandable blockquotes
         caption = (
-            "🥂 <b>Welcome To Otp Bot By notty adi</b> 🥂\n"
+            "🥂 <b>Welcome To Otp Bot By Notty Dhruv</b> 🥂\n"
             "<blockquote expandable>\n"
             "- Automatic OTPs 📍\n"
             "- Easy to Use 🥂🥂\n"
@@ -1573,7 +1573,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 start(call.message)
                 return
             
-            msg_text = "🛠️ Support: @TmOtpSeller"
+            msg_text = "🛠️ Support: @DHRUVXHERE"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu"))
             
@@ -3114,7 +3114,7 @@ def process_recharge_amount(msg):
         caption = f"""<blockquote>💳 <b>UPI Payment Details</b> 
 
 💰 Amount: {format_currency(amount)}
-📱 UPI ID: adibhai@fam
+📱 UPI ID: prajapatidhruv007@fam
 
 📋 Instructions:
 1. Scan QR code OR send {format_currency(amount)} to above UPI
@@ -3133,7 +3133,7 @@ def process_recharge_amount(msg):
         
         bot.send_photo(
             msg.chat.id,
-            "https://files.catbox.moe/g736td.jpg",
+            "https://i.supaimg.com/f55b21d6-e014-4a7e-bc0e-83ae53402f80.jpg",
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup
@@ -4000,7 +4000,7 @@ def ask_ban_user(message):
                 user_id_to_ban,
                 "🚫 **Your Account Has Been Banned**\n\n"
                 "You have been banned from using this bot.\n"
-                "Contact admin @VILLAIN_P4PA if you believe this is a mistake."
+                "Contact admin @DHRUV_PAPAHERE if you believe this is a mistake."
             )
         except:
             pass
