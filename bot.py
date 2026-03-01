@@ -43,7 +43,7 @@ from pyrogram.errors import (
 # CONFIG
 # ---------------------------------------------------------------------
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8497264898:AAG5cRnVHZJUva_xZausUElI50BTG9wErAs')
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8497264898:AAHSlS6eIaoUH7FgXB2amfO_HmA6PtA1tzQ')
 ADMIN_ID = int(os.getenv('ADMIN_ID', '8242451657'))
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
 API_ID = int(os.getenv('API_ID', '36330071'))
