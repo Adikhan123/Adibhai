@@ -43,17 +43,17 @@ from pyrogram.errors import (
 # CONFIG
 # ---------------------------------------------------------------------
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8037527972:AAGaGm4YLtuVZDfHgOKL7v37ZJvKmmfvC-U')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '8248130251'))
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8758505666:AAElWp1mZQlOHd3xOCKakQYRCiIXKrT9igQ')
+ADMIN_ID = int(os.getenv('ADMIN_ID', '8575496524'))
 MONGO_URL = os.getenv('MONGO_URL', 'mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
 API_ID = int(os.getenv('API_ID', '36330071'))
 API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
 
 # MUST JOIN CHANNELS - TWO CHANNELS
-MUST_JOIN_CHANNEL_1 = "@TM_SUPPORT_GC"
-MUST_JOIN_CHANNEL_2 = "@TM_SUPPORT_GC"
+MUST_JOIN_CHANNEL_1 = "@ADI_OTP_SUPPORT"
+MUST_JOIN_CHANNEL_2 = "@ADI_SUPPORT_GROUP"
 # LOG CHANNEL
-LOG_CHANNEL_ID = "-1003705564695"
+LOG_CHANNEL_ID = "-1003557056482"
 
 # Referral commission percentage
 REFERRAL_COMMISSION = 1.5
@@ -1049,7 +1049,7 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
         
         # Main menu caption with expandable blockquotes
         caption = (
-            "🥂 <b>Welcome To Otp Bot By Notty Dhruv</b> 🥂\n"
+            "🥂 <b>Welcome To Otp Bot By Adi</b> 🥂\n"
             "<blockquote expandable>\n"
             "- Automatic OTPs 📍\n"
             "- Easy to Use 🥂🥂\n"
@@ -1573,7 +1573,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 start(call.message)
                 return
             
-            msg_text = "🛠️ Support: @DHRUVXHERE"
+            msg_text = "🛠️ Support: @k4un_hu_mai"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu"))
             
@@ -3114,7 +3114,7 @@ def process_recharge_amount(msg):
         caption = f"""<blockquote>💳 <b>UPI Payment Details</b> 
 
 💰 Amount: {format_currency(amount)}
-📱 UPI ID: prajapatidhruv007@fam
+📱 UPI ID: adibhai@fam
 
 📋 Instructions:
 1. Scan QR code OR send {format_currency(amount)} to above UPI
@@ -3133,7 +3133,7 @@ def process_recharge_amount(msg):
         
         bot.send_photo(
             msg.chat.id,
-            "https://i.supaimg.com/f55b21d6-e014-4a7e-bc0e-83ae53402f80.jpg",
+            "https://files.catbox.moe/x6666i.jpg",
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup
