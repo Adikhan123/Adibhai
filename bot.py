@@ -16,16 +16,12 @@ except RuntimeError:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-# Simple fix
-import asyncio
-asyncio.set_event_loop(asyncio.new_event_loop())
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 import telebot.types
 
 @classmethod
 def _disable_story(cls, obj):
-    # Telegram stories completely ignored
     return None
 
 telebot.types.Story.de_json = _disable_story
@@ -45,14 +41,13 @@ from pyrogram.errors import (
 
 BOT_TOKEN = os.getenv('BOT_TOKEN', '8758505666:AAElWp1mZQlOHd3xOCKakQYRCiIXKrT9igQ')
 ADMIN_ID = int(os.getenv('ADMIN_ID', '8575496524'))
-MONGO_URL = os.getenv('MONGO_URL', 'mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
+MONGO_URL = os.getenv('MONGO_URL', ''mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
 API_ID = int(os.getenv('API_ID', '36330071'))
 API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
 
-# MUST JOIN CHANNELS - TWO CHANNELS
+# MUST JOIN CHANNELS
 MUST_JOIN_CHANNEL_1 = "@ADI_OTP_SUPPORT"
 MUST_JOIN_CHANNEL_2 = "@ADI_SUPPORT_GROUP"
-# LOG CHANNEL
 LOG_CHANNEL_ID = "-1003557056482"
 
 # Referral commission percentage
@@ -86,7 +81,6 @@ try:
     banned_users_col = db['banned_users']
     transactions_col = db['transactions']
     coupons_col = db['coupons']
-    admins_col = db['admins']  # New collection for multiple admins
     logger.info("✅ MongoDB connected successfully")
 except Exception as e:
     logger.error(f"❌ MongoDB connection failed: {e}")
@@ -111,10 +105,10 @@ edit_price_state = {}
 coupon_state = {}
 recharge_method_state = {}
 upi_payment_states = {}
-admin_add_state = {}  # For /addadmin flow
-admin_remove_state = {}  # For /removeadmin flow
 
-# add this line for bordcast 
+# NEW: Bulk buy states
+bulk_buy_states = {}  # Store bulk purchase data per user
+
 IS_BROADCASTING = False
 
 # Pyrogram login states
@@ -122,9 +116,6 @@ login_states = {}
 
 # BULK ADD STATES
 bulk_add_states = {}
-
-# Recharge approval tracking
-recharge_approvals = {}  # Track who approved/rejected which recharge
 
 # Import account management
 try:
@@ -136,441 +127,18 @@ except ImportError as e:
     account_manager = None
 
 # Import logging module
-try:
-    from logs import init_logger, log_purchase_async, log_otp_received_async, log_recharge_approved_async
-    init_logger(BOT_TOKEN, LOG_CHANNEL_ID)
-    logger.info(f"✅ Telegram logger initialized for channel: {LOG_CHANNEL_ID}")
-except ImportError as e:
-    logger.error(f"❌ Failed to load logging module: {e}")
+from logs import init_logger, log_purchase_async, log_otp_received_async, log_recharge_approved_async
+
+init_logger(BOT_TOKEN, LOG_CHANNEL_ID)
+logger.info(f"✅ Telegram logger initialized for channel: {LOG_CHANNEL_ID}")
 
 # Async manager for background tasks
 async_manager = None
 if account_manager:
     async_manager = account_manager.async_manager
 
-# Initialize admin in database
-def init_admin():
-    """Initialize the first admin in database"""
-    try:
-        # Check if admins collection exists and has any admins
-        if 'admins' not in db.list_collection_names():
-            db.create_collection('admins')
-        
-        admin_count = admins_col.count_documents({})
-        if admin_count == 0:
-            # Add the main admin
-            admin_data = {
-                "user_id": ADMIN_ID,
-                "added_by": "SYSTEM",
-                "added_at": datetime.utcnow(),
-                "is_super_admin": True
-            }
-            admins_col.insert_one(admin_data)
-            logger.info(f"✅ Main admin {ADMIN_ID} added to database")
-    except Exception as e:
-        logger.error(f"❌ Failed to initialize admin: {e}")
-
-# Call init_admin
-init_admin()
-
 # ---------------------------------------------------------------------
-# ADMIN MANAGEMENT FUNCTIONS
-# ---------------------------------------------------------------------
-def get_admin_info(user_id):
-    """Get admin info by user ID"""
-    try:
-        # Check if it's main admin
-        if str(user_id) == str(ADMIN_ID):
-            user = users_col.find_one({"user_id": user_id})
-            return {
-                "user_id": user_id,
-                "is_super_admin": True,
-                "name": user.get("name", "Main Admin") if user else "Main Admin"
-            }
-        
-        # Check in admins collection
-        admin = admins_col.find_one({"user_id": user_id})
-        if admin:
-            user = users_col.find_one({"user_id": user_id})
-            admin["name"] = user.get("name", "Admin") if user else "Admin"
-            return admin
-        return None
-    except Exception as e:
-        logger.error(f"Error in get_admin_info: {e}")
-        return None
-        
-def is_admin(user_id):
-    """Check if user is an admin"""
-    try:
-        # Check if it's the main admin
-        if str(user_id) == str(ADMIN_ID):
-            return True
-        
-        # Check in admins collection
-        admin = admins_col.find_one({"user_id": user_id})
-        return admin is not None
-    except:
-        return False
-
-def is_super_admin(user_id):
-    """Check if user is the main super admin"""
-    return str(user_id) == str(ADMIN_ID)
-
-def add_admin(user_id, added_by):
-    """Add a new admin (max 5 admins)"""
-    try:
-        # Check if already admin
-        if is_admin(user_id):
-            return False, "User is already an admin"
-        
-        # Count current admins (excluding super admin if counting separately)
-        admin_count = admins_col.count_documents({})
-        if admin_count >= 5:
-            return False, "Maximum 5 admins reached"
-        
-        # Add new admin
-        admin_data = {
-            "user_id": user_id,
-            "added_by": added_by,
-            "added_at": datetime.utcnow(),
-            "is_super_admin": False
-        }
-        admins_col.insert_one(admin_data)
-        
-        # Get user info
-        user = users_col.find_one({"user_id": user_id})
-        username = user.get("username", "No username") if user else "Unknown"
-        
-        return True, f"✅ Admin added successfully!"
-    except Exception as e:
-        logger.error(f"Error adding admin: {e}")
-        return False, f"Error: {str(e)}"
-
-def remove_admin(user_id, removed_by):
-    """Remove an admin"""
-    try:
-        # Check if user is admin
-        admin = admins_col.find_one({"user_id": user_id})
-        if not admin:
-            return False, "User is not an admin"
-        
-        # Check if trying to remove super admin
-        if str(user_id) == str(ADMIN_ID):
-            return False, "Cannot remove main admin"
-        
-        # Remove admin
-        result = admins_col.delete_one({"user_id": user_id})
-        
-        if result.deleted_count > 0:
-            return True, f"✅ Admin removed successfully!"
-        else:
-            return False, "Failed to remove admin"
-    except Exception as e:
-        logger.error(f"Error removing admin: {e}")
-        return False, f"Error: {str(e)}"
-
-def get_all_admins():
-    """Get list of all admins"""
-    try:
-        admins = list(admins_col.find({}))
-        # Also include main admin if not in collection
-        main_admin_exists = any(str(a.get("user_id")) == str(ADMIN_ID) for a in admins)
-        
-        admin_list = []
-        
-        # Add main admin first
-        if not main_admin_exists:
-            admin_list.append({
-                "user_id": ADMIN_ID,
-                "username": "Main Admin",
-                "name": "Main Admin",
-                "added_at": datetime.utcnow(),
-                "added_by": "SYSTEM",
-                "is_super_admin": True
-            })
-        
-        # Add other admins
-        for admin in admins:
-            user_id = admin["user_id"]
-            user = users_col.find_one({"user_id": user_id})
-            username = user.get("username", "No username") if user else "Unknown"
-            name = user.get("name", "Unknown") if user else "Unknown"
-            
-            admin_list.append({
-                "user_id": user_id,
-                "username": username,
-                "name": name,
-                "added_at": admin.get("added_at"),
-                "added_by": admin.get("added_by"),
-                "is_super_admin": admin.get("is_super_admin", False)
-            })
-        return admin_list
-    except Exception as e:
-        logger.error(f"Error getting admins: {e}")
-        return []
-
-def get_admin_count():
-    """Get total number of admins"""
-    try:
-        return admins_col.count_documents({}) + 1  # +1 for main admin
-    except:
-        return 1
-
-# ---------------------------------------------------------------------
-# ADMIN COMMAND HANDLERS
-# ---------------------------------------------------------------------
-
-@bot.message_handler(commands=['addadmin'])
-def add_admin_command(msg):
-    """Add a new admin - Only main admin can use"""
-    user_id = msg.from_user.id
-    
-    # Only main admin can add admins
-    if not is_super_admin(user_id):
-        bot.reply_to(msg, "❌ Sirf main admin hi addadmin use kar sakta hai!")
-        return
-    
-    # Start the add admin flow
-    admin_add_state[user_id] = {"step": "waiting_user_id"}
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_add_admin"))
-    
-    bot.reply_to(
-        msg,
-        "👤 **Add New Admin**\n\n"
-        "Please enter the User ID of the person you want to make admin:\n\n"
-        "📝 User ID milne ke liye:\n"
-        "• User ko /start karna hoga bot mein\n"
-        "• Ya admin panel se user search karo\n\n"
-        "Example: `123456789`",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-@bot.message_handler(commands=['removeadmin'])
-def remove_admin_command(msg):
-    """Remove an admin - Only main admin can use"""
-    user_id = msg.from_user.id
-    
-    # Only main admin can remove admins
-    if not is_super_admin(user_id):
-        bot.reply_to(msg, "❌ Sirf main admin hi removeadmin use kar sakta hai!")
-        return
-    
-    # Get list of admins
-    admins = get_all_admins()
-    
-    if len(admins) <= 1:  # Only main admin
-        bot.reply_to(
-            msg,
-            "📋 **Admin List**\n\n"
-            "Koi aur admin nahi hai remove karne ke liye.\n\n"
-            f"👑 Main Admin: `{ADMIN_ID}`",
-            parse_mode="Markdown"
-        )
-        return
-    
-    # Show list of admins
-    admin_list_text = "📋 **Existing Admins:**\n\n"
-    for admin in admins:
-        if not admin.get("is_super_admin", False):
-            admin_list_text += f"• `{admin['user_id']}` - {admin['name']}\n"
-    
-    admin_list_text += "\nPlease enter the User ID of the admin you want to remove:"
-    
-    admin_remove_state[user_id] = {"step": "waiting_user_id"}
-    
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton("❌ Cancel", callback_data="cancel_remove_admin"))
-    
-    bot.reply_to(
-        msg,
-        admin_list_text,
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data in ["cancel_add_admin", "cancel_remove_admin"])
-def handle_cancel_admin(call):
-    user_id = call.from_user.id
-    
-    if call.data == "cancel_add_admin":
-        if user_id in admin_add_state:
-            del admin_add_state[user_id]
-        bot.edit_message_text(
-            "❌ Add admin cancelled.",
-            call.message.chat.id,
-            call.message.message_id
-        )
-    elif call.data == "cancel_remove_admin":
-        if user_id in admin_remove_state:
-            del admin_remove_state[user_id]
-        bot.edit_message_text(
-            "❌ Remove admin cancelled.",
-            call.message.chat.id,
-            call.message.message_id
-        )
-
-@bot.message_handler(func=lambda m: m.from_user.id in admin_add_state and admin_add_state[m.from_user.id]["step"] == "waiting_user_id")
-def handle_add_admin_userid(msg):
-    user_id = msg.from_user.id
-    
-    try:
-        target_user_id = int(msg.text.strip())
-        
-        # Check if trying to add self
-        if target_user_id == user_id:
-            bot.reply_to(msg, "❌ Aap khudko admin nahi bana sakte! Aap already main admin ho.")
-            del admin_add_state[user_id]
-            return
-        
-        # Check if user exists
-        user = users_col.find_one({"user_id": target_user_id})
-        if not user:
-            bot.reply_to(
-                msg,
-                f"❌ User `{target_user_id}` database mein nahi mila.\n\n"
-                f"Pehle user ko /start karwaiye bot mein.",
-                parse_mode="Markdown"
-            )
-            del admin_add_state[user_id]
-            return
-        
-        # Check if already admin
-        if is_admin(target_user_id):
-            bot.reply_to(
-                msg,
-                f"⚠️ User `{target_user_id}` already admin hai!",
-                parse_mode="Markdown"
-            )
-            del admin_add_state[user_id]
-            return
-        
-        # Check max admins
-        admin_count = admins_col.count_documents({})
-        if admin_count >= 5:
-            bot.reply_to(
-                msg,
-                "❌ Maximum 5 admins ho chuke hain. Pehle kisi admin ko remove karo.",
-                parse_mode="Markdown"
-            )
-            del admin_add_state[user_id]
-            return
-        
-        # Add admin
-        success, message = add_admin(target_user_id, user_id)
-        
-        if success:
-            # Get updated admin count
-            new_count = admins_col.count_documents({})
-            
-            bot.reply_to(
-                msg,
-                f"✅ **Admin Added Successfully!**\n\n"
-                f"👤 User ID: `{target_user_id}`\n"
-                f"👤 Name: {user.get('name', 'Unknown')}\n"
-                f"📊 Total Admins: {new_count + 1}/6 (Main Admin + {new_count})\n\n"
-                f"Ab ye admin panel access kar sakte hain!",
-                parse_mode="Markdown"
-            )
-            
-            # Notify new admin
-            try:
-                bot.send_message(
-                    target_user_id,
-                    f"🎉 **Congratulations! You've Been Promoted to Admin!**\n\n"
-                    f"Ab aap admin panel use kar sakte hain:\n"
-                    f"• Recharge Approve/Reject\n"
-                    f"• Add/Remove Countries\n"
-                    f"• Add Accounts\n"
-                    f"• Broadcast Messages\n"
-                    f"• And more!\n\n"
-                    f"Admin panel ke liye /start karo.",
-                    parse_mode="Markdown"
-                )
-            except:
-                bot.reply_to(msg, "⚠️ New admin ko notification nahi bhej sakte (unhone bot block kar diya hai)")
-        else:
-            bot.reply_to(msg, f"❌ {message}")
-        
-        del admin_add_state[user_id]
-        
-    except ValueError:
-        bot.reply_to(msg, "❌ Invalid User ID. Sirf numbers daalo.")
-    except Exception as e:
-        logger.error(f"Add admin error: {e}")
-        bot.reply_to(msg, f"❌ Error: {str(e)}")
-        del admin_add_state[user_id]
-
-@bot.message_handler(func=lambda m: m.from_user.id in admin_remove_state and admin_remove_state[m.from_user.id]["step"] == "waiting_user_id")
-def handle_remove_admin_userid(msg):
-    user_id = msg.from_user.id
-    
-    try:
-        target_user_id = int(msg.text.strip())
-        
-        # Check if trying to remove self
-        if target_user_id == user_id:
-            bot.reply_to(msg, "❌ Aap khudko remove nahi kar sakte! Aap main admin ho.")
-            del admin_remove_state[user_id]
-            return
-        
-        # Check if user is admin
-        if not is_admin(target_user_id):
-            bot.reply_to(
-                msg,
-                f"❌ User `{target_user_id}` admin nahi hai!",
-                parse_mode="Markdown"
-            )
-            del admin_remove_state[user_id]
-            return
-        
-        # Remove admin
-        success, message = remove_admin(target_user_id, user_id)
-        
-        if success:
-            # Get user info
-            user = users_col.find_one({"user_id": target_user_id})
-            name = user.get('name', 'Unknown') if user else 'Unknown'
-            
-            # Get updated admin count
-            new_count = admins_col.count_documents({})
-            
-            bot.reply_to(
-                msg,
-                f"✅ **Admin Removed Successfully!**\n\n"
-                f"👤 User ID: `{target_user_id}`\n"
-                f"👤 Name: {name}\n"
-                f"📊 Remaining Admins: {new_count + 1}/6 (Main Admin + {new_count})\n\n"
-                f"Ab ye admin nahi rahe.",
-                parse_mode="Markdown"
-            )
-            
-            # Notify removed admin
-            try:
-                bot.send_message(
-                    target_user_id,
-                    f"⚠️ **Your Admin Access Has Been Removed**\n\n"
-                    f"Aap ab admin nahi rahe. Bot use karne ke liye /start karo.",
-                    parse_mode="Markdown"
-                )
-            except:
-                pass
-        else:
-            bot.reply_to(msg, f"❌ {message}")
-        
-        del admin_remove_state[user_id]
-        
-    except ValueError:
-        bot.reply_to(msg, "❌ Invalid User ID. Sirf numbers daalo.")
-    except Exception as e:
-        logger.error(f"Remove admin error: {e}")
-        bot.reply_to(msg, f"❌ Error: {str(e)}")
-        del admin_remove_state[user_id]
-
-# ---------------------------------------------------------------------
-# UTILITY FUNCTIONS - UPDATED FOR TWO CHANNELS
+# UTILITY FUNCTIONS
 # ---------------------------------------------------------------------
 
 def ensure_user_exists(user_id, user_name=None, username=None, referred_by=None):
@@ -639,6 +207,19 @@ def format_currency(x):
 def get_available_accounts_count(country):
     return accounts_col.count_documents({"country": country, "status": "active", "used": False})
 
+def get_available_accounts(country, limit=None):
+    """Get available accounts for a country"""
+    query = {"country": country, "status": "active", "used": False}
+    if limit:
+        return list(accounts_col.find(query).limit(limit))
+    return list(accounts_col.find(query))
+
+def is_admin(user_id):
+    try:
+        return str(user_id) == str(ADMIN_ID)
+    except:
+        return False
+
 def is_user_banned(user_id):
     banned = banned_users_col.find_one({"user_id": user_id, "status": "active"})
     return banned is not None
@@ -697,17 +278,14 @@ def add_referral_commission(referrer_id, recharge_amount, recharge_id):
         logger.error(f"Error adding referral commission: {e}")
 
 # ---------------------------------------------------------------------
-# UPDATED: CHECK BOTH CHANNELS MEMBERSHIP
+# CHANNEL MEMBERSHIP CHECK
 # ---------------------------------------------------------------------
 
 def has_user_joined_channels(user_id):
-    """Check if user has joined both mandatory channels"""
     try:
-        # Check first channel
         member1 = bot.get_chat_member(MUST_JOIN_CHANNEL_1, user_id)
         status1 = member1.status in ['member', 'administrator', 'creator']
         
-        # Check second channel
         member2 = bot.get_chat_member(MUST_JOIN_CHANNEL_2, user_id)
         status2 = member2.status in ['member', 'administrator', 'creator']
         
@@ -717,10 +295,8 @@ def has_user_joined_channels(user_id):
         return False
 
 def get_missing_channels(user_id):
-    """Get list of channels user hasn't joined yet"""
     missing = []
     try:
-        # Check first channel
         try:
             member1 = bot.get_chat_member(MUST_JOIN_CHANNEL_1, user_id)
             if member1.status not in ['member', 'administrator', 'creator']:
@@ -728,7 +304,6 @@ def get_missing_channels(user_id):
         except:
             missing.append(MUST_JOIN_CHANNEL_1)
         
-        # Check second channel
         try:
             member2 = bot.get_chat_member(MUST_JOIN_CHANNEL_2, user_id)
             if member2.status not in ['member', 'administrator', 'creator']:
@@ -805,7 +380,7 @@ def claim_coupon(coupon_code, user_id):
             "user_id": user_id,
             "amount": amount,
             "type": "coupon_redeem",
-            "description": f"Coupou redeem: {coupon_code}",
+            "description": f"Coupon redeem: {coupon_code}",
             "coupon_code": coupon_code,
             "timestamp": datetime.utcnow()
         }
@@ -894,130 +469,18 @@ def get_coupon_status(code):
     }
 
 # ---------------------------------------------------------------------
-# ENHANCED RECHARGE APPROVAL FUNCTIONS
-# ---------------------------------------------------------------------
-
-def process_recharge_approval(admin_id, req_id, action):
-    """Process recharge approval/rejection with tracking"""
-    try:
-        # Get recharge request
-        req = recharges_col.find_one({"req_id": req_id})
-        if not req:
-            return False, "Request not found", None
-        
-        # Check if already processed
-        if req.get("status") != "pending":
-            return False, f"Request already {req.get('status')}", None
-        
-        # Get admin info
-        admin_info = get_admin_info(admin_id)
-        admin_name = f"Admin {admin_id}"
-        if admin_info:
-            user = users_col.find_one({"user_id": admin_id})
-            if user:
-                admin_name = user.get("name", f"Admin {admin_id}")
-        
-        user_target = req.get("user_id")
-        amount = float(req.get("amount", 0))
-        
-        # Track this approval
-        approval_key = f"{req_id}_{action}"
-        
-        # Check if another admin already processed this (via tracking)
-        if approval_key in recharge_approvals:
-            prev_admin = recharge_approvals[approval_key]
-            return False, f"Already {action}ed by {prev_admin['admin_name']}", None
-        
-        if action == "approve":
-            # Add balance to user
-            add_balance(user_target, amount)
-            
-            # Update recharge status
-            recharges_col.update_one(
-                {"req_id": req_id},
-                {"$set": {
-                    "status": "approved", 
-                    "processed_at": datetime.utcnow(), 
-                    "processed_by": admin_id,
-                    "processed_by_name": admin_name
-                }}
-            )
-            
-            # Log approval
-            try:
-                from logs import log_recharge_approved_async
-                log_recharge_approved_async(
-                    user_id=user_target,
-                    amount=amount,
-                    method=req.get("method", "UPI"),
-                    utr=req.get("utr")
-                )
-            except:
-                pass
-            
-            # Add referral commission if applicable
-            user_data = users_col.find_one({"user_id": user_target})
-            if user_data and user_data.get("referred_by"):
-                add_referral_commission(user_data["referred_by"], amount, req)
-            
-            # Mark this approval in tracking
-            recharge_approvals[approval_key] = {
-                "admin_id": admin_id,
-                "admin_name": admin_name,
-                "timestamp": datetime.utcnow()
-            }
-            
-            return True, f"✅ Recharge approved by {admin_name}", {
-                "admin_name": admin_name,
-                "admin_id": admin_id,
-                "action": "approved"
-            }
-            
-        else:  # cancel/reject
-            # Update recharge status
-            recharges_col.update_one(
-                {"req_id": req_id},
-                {"$set": {
-                    "status": "cancelled", 
-                    "processed_at": datetime.utcnow(), 
-                    "processed_by": admin_id,
-                    "processed_by_name": admin_name
-                }}
-            )
-            
-            # Mark this rejection in tracking
-            recharge_approvals[approval_key] = {
-                "admin_id": admin_id,
-                "admin_name": admin_name,
-                "timestamp": datetime.utcnow()
-            }
-            
-            return True, f"❌ Recharge rejected by {admin_name}", {
-                "admin_name": admin_name,
-                "admin_id": admin_id,
-                "action": "rejected"
-            }
-            
-    except Exception as e:
-        logger.error(f"Error in recharge approval: {e}")
-        return False, f"Error: {str(e)}", None
-
-# ---------------------------------------------------------------------
-# UI HELPER FUNCTIONS - FIXED
+# UI HELPER FUNCTIONS
 # ---------------------------------------------------------------------
 
 def edit_or_resend(chat_id, message_id, text, markup=None, parse_mode=None, photo_url=None):
-    """Edit message if possible, otherwise delete and send new"""
     try:
         if photo_url:
-            # For photos, we need to send new message
             try:
                 bot.delete_message(chat_id, message_id)
             except:
                 pass
             return bot.send_photo(chat_id, photo_url, caption=text, parse_mode=parse_mode, reply_markup=markup)
         else:
-            # For text messages, try to edit first
             try:
                 return bot.edit_message_text(
                     text,
@@ -1027,7 +490,6 @@ def edit_or_resend(chat_id, message_id, text, markup=None, parse_mode=None, phot
                     reply_markup=markup
                 )
             except Exception as e:
-                # If edit fails, delete and send new
                 try:
                     bot.delete_message(chat_id, message_id)
                 except:
@@ -1038,18 +500,15 @@ def edit_or_resend(chat_id, message_id, text, markup=None, parse_mode=None, phot
         return bot.send_message(chat_id, text, parse_mode=parse_mode, reply_markup=markup)
 
 def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
-    """Clean UI and send main menu - FIXED: Always deletes old message"""
     try:
-        # ALWAYS try to delete the previous message
         if user_id in user_last_message:
             try:
                 bot.delete_message(chat_id, user_last_message[user_id])
             except:
                 pass
         
-        # Main menu caption with expandable blockquotes
         caption = (
-            "🥂 <b>Welcome To Otp Bot By Adi</b> 🥂\n"
+            "🥂 <b>Welcome To Otp Bot By Adi </b> 🥂\n"
             "<blockquote expandable>\n"
             "- Automatic OTPs 📍\n"
             "- Easy to Use 🥂🥂\n"
@@ -1069,29 +528,23 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
         
         if markup is None:
             markup = InlineKeyboardMarkup(row_width=2)
-            # Row 1: 2 buttons
             markup.add(
                 InlineKeyboardButton("🛒 Buy Account", callback_data="buy_account"),
                 InlineKeyboardButton("💰 Balance", callback_data="balance")
             )
-            # Row 2: 1 button
             markup.add(
                 InlineKeyboardButton("💳 Recharge", callback_data="recharge")
             )
-            # Row 3: 2 buttons
             markup.add(
                 InlineKeyboardButton("👥 Refer Friends", callback_data="refer_friends"),
                 InlineKeyboardButton("🎁 Redeem", callback_data="redeem_coupon")
             )
-            # Row 4: 1 button
             markup.add(
                 InlineKeyboardButton("🛠️ Support", callback_data="support")
             )
-            # Row 5: 1 button (only for admin)
             if is_admin(user_id):
                 markup.add(InlineKeyboardButton("👑 Admin Panel", callback_data="admin_panel"))
         
-        # Send new message (TEXT ONLY - NO PHOTO)
         sent_msg = bot.send_message(
             chat_id,
             text or caption,
@@ -1103,7 +556,6 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
         return sent_msg
     except Exception as e:
         logger.error(f"Error in clean_ui_and_send_menu: {e}")
-        # Fallback
         try:
             sent_msg = bot.send_message(chat_id, text or caption, parse_mode="HTML", reply_markup=markup)
             user_last_message[user_id] = sent_msg.message_id
@@ -1116,9 +568,7 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
 # ---------------------------------------------------------------------
 
 def transfer_balance(sender_id, receiver_id, amount):
-    """Balance transfer function"""
     try:
-        # Sender ka balance check
         sender_balance = get_balance(sender_id)
         
         if sender_balance < amount:
@@ -1130,16 +580,13 @@ def transfer_balance(sender_id, receiver_id, amount):
         if sender_id == receiver_id:
             return False, "Cannot send to yourself"
         
-        # Check if receiver exists
         receiver = users_col.find_one({"user_id": receiver_id})
         if not receiver:
             return False, "Receiver user not found"
         
-        # Transfer balance
         deduct_balance(sender_id, amount)
         add_balance(receiver_id, amount)
         
-        # Transaction record
         transaction_id = f"TRF{int(time.time())}{sender_id}"
         transaction_record = {
             "transaction_id": transaction_id,
@@ -1157,8 +604,845 @@ def transfer_balance(sender_id, receiver_id, amount):
         logger.error(f"Transfer error: {e}")
         return False, f"Error: {str(e)}"
 
+# =============================================================
+# BULK BUY FUNCTIONS - COMPLETE REPLACEMENT
+# =============================================================
+
+def show_bulk_buy_options(chat_id, message_id, user_id, country_name):
+    """Show bulk buy options (enter number of accounts)"""
+    country = get_country_by_name(country_name)
+    if not country:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            "❌ Country not found.",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("⬅️ Back", callback_data="back_to_countries")
+            )
+        )
+        return
+    
+    available = get_available_accounts_count(country_name)
+    price = country.get('price', 0)
+    max_allowed = min(30, available)
+    
+    if available < 2:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            f"❌ **Insufficient Stock for Bulk Buy**\n\n"
+            f"🌍 Country: {country_name}\n"
+            f"📊 Available: {available} accounts\n\n"
+            f"Bulk buy requires at least 2 accounts in stock.",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("⬅️ Back to Country", callback_data=f"country_raw_{country_name}")
+            )
+        )
+        return
+    
+    bulk_buy_states[user_id] = {
+        "country": country_name,
+        "price": price,
+        "available": available,
+        "step": "waiting_quantity",
+        "chat_id": chat_id,
+        "message_id": message_id
+    }
+    
+    text = f"📦 **Bulk Purchase Mode**\n\n"
+    text += f"🌍 Country: {country_name}\n"
+    text += f"💰 Price per account: {format_currency(price)}\n"
+    text += f"📊 Available: {available} accounts\n\n"
+    text += f"🔢 **Enter number of accounts to buy**\n"
+    text += f"• Minimum: 2\n"
+    text += f"• Maximum: {max_allowed}\n\n"
+    text += f"Please type a number between 2 and {max_allowed}:"
+    
+    markup = InlineKeyboardMarkup()
+    markup.add(
+        InlineKeyboardButton("⬅️ Back to Country", callback_data=f"country_raw_{country_name}"),
+        InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")
+    )
+    
+    edit_or_resend(
+        chat_id,
+        message_id,
+        text,
+        markup=markup,
+        parse_mode="Markdown"
+    )
+
+def process_bulk_quantity_input(msg):
+    """Process quantity input for bulk buy"""
+    user_id = msg.from_user.id
+    
+    if user_id not in bulk_buy_states:
+        return
+    
+    state = bulk_buy_states[user_id]
+    if state.get("step") != "waiting_quantity":
+        return
+    
+    try:
+        quantity = int(msg.text.strip())
+        country_name = state["country"]
+        price = state["price"]
+        available = state["available"]
+        max_allowed = min(30, available)
+        
+        if quantity < 2:
+            bot.send_message(
+                msg.chat.id,
+                f"❌ Minimum purchase is 2 accounts.\nPlease enter a number between 2 and {max_allowed}:"
+            )
+            return
+        
+        if quantity > max_allowed:
+            bot.send_message(
+                msg.chat.id,
+                f"❌ Maximum purchase is {max_allowed} accounts.\nPlease enter a number between 2 and {max_allowed}:"
+            )
+            return
+        
+        total_price = price * quantity
+        balance = get_balance(user_id)
+        
+        state["quantity"] = quantity
+        state["total_price"] = total_price
+        state["step"] = "confirm"
+        
+        text = f"📦 **Bulk Purchase Confirmation**\n\n"
+        text += f"🌍 Country: {country_name}\n"
+        text += f"📊 Quantity: {quantity} accounts\n"
+        text += f"💰 Price per account: {format_currency(price)}\n"
+        text += f"💵 **Total Price: {format_currency(total_price)}**\n"
+        text += f"💳 Your Balance: {format_currency(balance)}\n\n"
+        
+        if balance >= total_price:
+            text += f"✅ You have sufficient balance!\n"
+            text += f"💳 Balance after purchase: {format_currency(balance - total_price)}\n\n"
+            text += f"Click **Confirm Purchase** to buy {quantity} accounts."
+        else:
+            needed = total_price - balance
+            text += f"❌ **Insufficient Balance!**\n"
+            text += f"💰 Need {format_currency(needed)} more.\n"
+            text += f"Please recharge or reduce quantity."
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        
+        if balance >= total_price:
+            markup.add(InlineKeyboardButton("✅ Confirm Purchase", callback_data="bulk_confirm"))
+        else:
+            markup.add(InlineKeyboardButton("💳 Recharge Now", callback_data="recharge"))
+        
+        markup.add(
+            InlineKeyboardButton("✏️ Change Quantity", callback_data=f"bulk_change_{country_name}"),
+            InlineKeyboardButton("⬅️ Back to Country", callback_data=f"country_raw_{country_name}")
+        )
+        
+        # Delete user's quantity message
+        try:
+            bot.delete_message(msg.chat.id, msg.message_id)
+        except:
+            pass
+        
+        # Update the original message
+        sent_msg = edit_or_resend(
+            msg.chat.id,
+            state["message_id"],
+            text,
+            markup=markup,
+            parse_mode="Markdown"
+        )
+        user_last_message[user_id] = sent_msg.message_id
+        bulk_buy_states[user_id]["message_id"] = sent_msg.message_id
+        
+    except ValueError:
+        bot.send_message(
+            msg.chat.id,
+            f"❌ Invalid number. Please enter a valid number between 2 and {min(30, state['available'])}:"
+        )
+    except Exception as e:
+        logger.error(f"Bulk quantity error: {e}")
+        bot.send_message(msg.chat.id, f"❌ Error: {str(e)}")
+
+def process_bulk_purchase(user_id, chat_id, message_id):
+    """Process bulk purchase - create accounts and show first one"""
+    if user_id not in bulk_buy_states:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            "❌ Session expired. Please start again.",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🛒 Buy Account", callback_data="buy_account")
+            )
+        )
+        return
+    
+    state = bulk_buy_states[user_id]
+    country_name = state["country"]
+    quantity = state["quantity"]
+    total_price = state["total_price"]
+    
+    # Check balance again
+    balance = get_balance(user_id)
+    if balance < total_price:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            f"❌ **Insufficient Balance!**\n\n"
+            f"Required: {format_currency(total_price)}\n"
+            f"Your Balance: {format_currency(balance)}\n"
+            f"Need: {format_currency(total_price - balance)} more",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("💳 Recharge", callback_data="recharge"),
+                InlineKeyboardButton("⬅️ Back", callback_data=f"country_raw_{country_name}")
+            )
+        )
+        return
+    
+    # Get available accounts
+    accounts = get_available_accounts(country_name, quantity)
+    if len(accounts) < quantity:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            f"❌ **Stock Changed!**\n\n"
+            f"Only {len(accounts)} accounts available now.\n"
+            f"Please try again.",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("⬅️ Back", callback_data=f"country_raw_{country_name}")
+            )
+        )
+        bulk_buy_states.pop(user_id, None)
+        return
+    
+    # Deduct balance
+    deduct_balance(user_id, total_price)
+    
+    # Process all accounts
+    successful_accounts = []
+    timestamp = int(time.time())
+    
+    for i, account in enumerate(accounts):
+        # Create unique session ID for each account
+        session_id = f"bulk_{user_id}_{timestamp}_{i+1}"
+        
+        # Create OTP session
+        otp_session = {
+            "session_id": session_id,
+            "user_id": user_id,
+            "phone": account['phone'],
+            "session_string": account.get('session_string', ''),
+            "status": "active",
+            "created_at": datetime.utcnow(),
+            "account_id": str(account['_id']),
+            "has_otp": False,
+            "last_otp": None,
+            "last_otp_time": None,
+            "bulk_index": i + 1,
+            "bulk_total": quantity,
+            "revealed": False,  # Track if this account has been revealed to user
+            "country": country_name,
+            "price": state["price"],
+            "message_id": None  # Will be set when message is sent
+        }
+        otp_sessions_col.insert_one(otp_session)
+        
+        # Create order
+        order = {
+            "user_id": user_id,
+            "account_id": str(account['_id']),
+            "country": country_name,
+            "price": state["price"],
+            "phone_number": account.get('phone', 'N/A'),
+            "session_id": session_id,
+            "status": "waiting_otp",
+            "created_at": datetime.utcnow(),
+            "monitoring_duration": 1800,
+            "bulk_index": i + 1,
+            "bulk_total": quantity
+        }
+        orders_col.insert_one(order)
+        
+        # Mark account as used
+        accounts_col.update_one(
+            {"_id": account['_id']},
+            {"$set": {"used": True, "used_at": datetime.utcnow()}}
+        )
+        
+        # Start monitoring in background
+        try:
+            if account_manager:
+                threading.Thread(
+                    target=account_manager.start_simple_monitoring_sync,
+                    args=(account.get('session_string', ''), session_id, 1800),
+                    daemon=True
+                ).start()
+        except Exception as e:
+            logger.error(f"Monitoring error for {session_id}: {e}")
+        
+        successful_accounts.append({
+            "phone": account['phone'],
+            "session_id": session_id,
+            "index": i + 1,
+            "two_step_password": account.get('two_step_password', ''),
+            "message_id": None
+        })
+    
+    # Log purchases
+    try:
+        from logs import log_purchase_async
+        for acc in successful_accounts:
+            log_purchase_async(
+                user_id=user_id,
+                country=country_name,
+                price=state["price"],
+                phone=acc['phone']
+            )
+    except:
+        pass
+    
+    # Store all accounts in user_orders
+    user_orders[user_id] = {
+        "bulk_sessions": [acc["session_id"] for acc in successful_accounts],
+        "country": country_name,
+        "quantity": quantity,
+        "accounts": successful_accounts,
+        "current_revealed": 1,  # Only first is revealed initially
+        "revealed_indices": [1]  # Track which indices have been revealed
+    }
+    
+    # Delete confirmation message
+    try:
+        bot.delete_message(chat_id, message_id)
+    except:
+        pass
+    
+    # Send FIRST account message only
+    send_bulk_account_message(user_id, chat_id, successful_accounts[0])
+    
+    # Clear bulk buy state
+    bulk_buy_states.pop(user_id, None)
+
+def send_bulk_account_message(user_id, chat_id, account_data):
+    """Send a single bulk account message (like single buy)"""
+    session_id = account_data["session_id"]
+    phone = account_data["phone"]
+    idx = account_data["index"]
+    two_fa = account_data.get("two_step_password", "")
+    
+    country = user_orders[user_id]['country'] if user_id in user_orders else "Unknown"
+    
+    # Format exactly like single buy
+    account_details = f"""✅ **Account #{idx} Purchase Successful!** 
+
+🌍 Country: {country}
+📱 Phone Number: `{phone}`"""
+    
+    if two_fa:
+        account_details += f"\n🔒 2FA Password: `{two_fa}`"
+    
+    account_details += f"\n\n📲 **Instructions:**\n"
+    account_details += f"1. Open Telegram X app\n"
+    account_details += f"2. Enter phone number: `{phone}`\n"
+    account_details += f"3. Click 'Next'\n"
+    account_details += f"4. **Click 'Get OTP' button below when you need OTP**\n\n"
+    account_details += f"⏳ OTP available for 30 minutes"
+    
+    # Single button - Get OTP
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton(
+        f"🔢 Get OTP #{idx}", 
+        callback_data=f"bulk_get_otp_{session_id}"
+    ))
+    
+    # If this is first account and there are more, show waiting message
+    if user_id in user_orders:
+        remaining = user_orders[user_id]['quantity'] - user_orders[user_id]['current_revealed']
+        if remaining > 0:
+            account_details += f"\n\n⏳ **{remaining} more account(s) will appear after you get OTP from this account**"
+    
+    # Send message
+    sent_msg = bot.send_message(
+        chat_id,
+        account_details,
+        parse_mode="Markdown",
+        reply_markup=markup
+    )
+    
+    # Store message ID in database
+    otp_sessions_col.update_one(
+        {"session_id": session_id},
+        {"$set": {
+            "message_sent": True,
+            "message_id": sent_msg.message_id,
+            "revealed": True
+        }}
+    )
+    
+    # Update user_orders with message ID
+    if user_id in user_orders:
+        for acc in user_orders[user_id]['accounts']:
+            if acc['session_id'] == session_id:
+                acc['message_id'] = sent_msg.message_id
+                break
+    
+    # Also store in user_last_message for cleanup
+    user_last_message[user_id] = sent_msg.message_id
+
+def handle_bulk_get_otp(user_id, session_id, chat_id, message_id, callback_id):
+    """Handle Get OTP for bulk account - updates the same message"""
+    try:
+        # Get session data
+        session_data = otp_sessions_col.find_one({"session_id": session_id})
+        if not session_data:
+            bot.answer_callback_query(callback_id, "❌ Session expired", show_alert=True)
+            return
+        
+        # Verify ownership
+        if session_data.get("user_id") != user_id:
+            bot.answer_callback_query(callback_id, "❌ Not your account", show_alert=True)
+            return
+        
+        # Check if session is still active
+        if session_data.get("status") not in ["active", "otp_received"]:
+            bot.answer_callback_query(callback_id, "❌ Session is no longer active", show_alert=True)
+            return
+        
+        bot.answer_callback_query(callback_id, "🔍 Fetching OTP...", show_alert=False)
+        
+        # Get OTP
+        session_string = session_data.get("session_string")
+        if not session_string:
+            bot.answer_callback_query(callback_id, "❌ No session data", show_alert=True)
+            return
+        
+        otp_code = account_manager.get_latest_otp_sync(session_string)
+        
+        if not otp_code:
+            bot.answer_callback_query(callback_id, "❌ No OTP yet. Please wait...", show_alert=True)
+            return
+        
+        # Check if this is first OTP for this account
+        was_first_otp = not session_data.get('has_otp', False)
+        bulk_index = session_data.get("bulk_index", 1)
+        
+        # Update database
+        otp_sessions_col.update_one(
+            {"session_id": session_id},
+            {"$set": {
+                "has_otp": True,
+                "last_otp": otp_code,
+                "last_otp_time": datetime.utcnow(),
+                "status": "otp_received",
+                "message_id": message_id  # Store the message ID
+            }}
+        )
+        
+        # Log OTP received
+        try:
+            from logs import log_otp_received_async
+            log_otp_received_async(
+                user_id=user_id,
+                phone=session_data.get('phone', 'N/A'),
+                otp_code=otp_code,
+                country=session_data.get('country', 'Unknown'),
+                price=session_data.get('price', 0)
+            )
+        except:
+            pass
+        
+        # Get 2FA if exists
+        two_step_password = ""
+        account_id = session_data.get("account_id")
+        if account_id:
+            try:
+                account = accounts_col.find_one({"_id": ObjectId(account_id)})
+                if account:
+                    two_step_password = account.get("two_step_password", "")
+            except:
+                pass
+        
+        phone = session_data.get("phone", "N/A")
+        
+        # Create updated message with OTP
+        updated_message = f"""✅ **OTP for Account #{bulk_index}** 
+
+📱 Phone: `{phone}`
+🔢 **OTP Code:** `{otp_code}`"""
+        
+        if two_step_password:
+            updated_message += f"\n🔐 2FA Password: `{two_step_password}`"
+        
+        updated_message += f"\n\n⏰ Time: {datetime.utcnow().strftime('%H:%M:%S')}"
+        updated_message += f"\n\nEnter this code in Telegram X app."
+        
+        # Create markup with two buttons
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton(f"🔄 Get OTP Again #{bulk_index}", callback_data=f"bulk_get_otp_again_{session_id}"),
+            InlineKeyboardButton(f"🚪 Logout #{bulk_index}", callback_data=f"bulk_logout_{session_id}")
+        )
+        
+        # Edit the existing message
+        try:
+            bot.edit_message_text(
+                updated_message,
+                chat_id,
+                message_id,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+            bot.answer_callback_query(callback_id, f"✅ OTP: {otp_code}", show_alert=True)
+        except Exception as e:
+            logger.error(f"Edit message error in get_otp: {e}")
+            # If edit fails, try to get stored message ID
+            stored_message_id = session_data.get("message_id")
+            
+            if stored_message_id and stored_message_id != message_id:
+                try:
+                    bot.edit_message_text(
+                        updated_message,
+                        chat_id,
+                        stored_message_id,
+                        parse_mode="Markdown",
+                        reply_markup=markup
+                    )
+                    bot.answer_callback_query(callback_id, f"✅ OTP: {otp_code}", show_alert=True)
+                    return
+                except:
+                    pass
+            
+            # If all edits fail, send new message
+            try:
+                # Delete old message if possible
+                try:
+                    bot.delete_message(chat_id, message_id)
+                except:
+                    pass
+                
+                sent_msg = bot.send_message(
+                    chat_id,
+                    updated_message,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+                # Update message ID in database
+                otp_sessions_col.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"message_id": sent_msg.message_id}}
+                )
+                bot.answer_callback_query(callback_id, f"✅ OTP: {otp_code}", show_alert=True)
+            except Exception as e2:
+                logger.error(f"Send new message error: {e2}")
+                bot.answer_callback_query(callback_id, f"❌ Could not update message", show_alert=True)
+        
+        # If this was first OTP, reveal next account
+        if was_first_otp:
+            reveal_next_bulk_account(user_id, chat_id, bulk_index)
+        
+    except Exception as e:
+        logger.error(f"Bulk get OTP error: {e}")
+        bot.answer_callback_query(callback_id, f"❌ Error: {str(e)}", show_alert=True)
+
+def handle_bulk_get_otp_again(user_id, session_id, chat_id, message_id, callback_id):
+    """Handle Get OTP Again for bulk account - DEBUG VERSION"""
+    try:
+        logger.info(f"=== GET OTP AGAIN CALLED ===")
+        logger.info(f"User ID: {user_id}")
+        logger.info(f"Session ID Received: {session_id}")
+
+        # Get session data
+        session_data = otp_sessions_col.find_one({"session_id": session_id})
+
+        logger.info(f"Session Data From DB: {session_data}")
+
+        if not session_data:
+            logger.error("❌ No session found in DB")
+            bot.answer_callback_query(callback_id, "❌ Session expired", show_alert=True)
+            return
+        
+        # Verify ownership
+        if session_data.get("user_id") != user_id:
+            logger.error("❌ User mismatch")
+            bot.answer_callback_query(callback_id, "❌ Not your account", show_alert=True)
+            return
+        
+        logger.info(f"Session Status: {session_data.get('status')}")
+
+        # Check if session is completed only
+        if session_data.get("status") == "completed":
+            logger.error("❌ Session marked completed")
+            bot.answer_callback_query(callback_id, "❌ Session completed", show_alert=True)
+            return
+        
+        bot.answer_callback_query(callback_id, "🔍 Fetching OTP...", show_alert=False)
+        
+        # Get OTP
+        session_string = session_data.get("session_string")
+        logger.info(f"Session String Exists: {bool(session_string)}")
+
+        if not session_string:
+            logger.error("❌ Session string missing")
+            bot.answer_callback_query(callback_id, "❌ No session data", show_alert=True)
+            return
+        
+        try:
+            otp_code = account_manager.get_latest_otp_sync(session_string)
+            logger.info(f"OTP Fetched: {otp_code}")
+        except Exception as e:
+            logger.error(f"❌ OTP FETCH ERROR: {e}")
+            bot.answer_callback_query(callback_id, "❌ OTP fetch failed", show_alert=True)
+            return
+        
+        if not otp_code:
+            logger.warning("⚠️ No OTP found")
+            bot.answer_callback_query(callback_id, "❌ No new OTP yet", show_alert=True)
+            return
+        
+        # Update database
+        otp_sessions_col.update_one(
+            {"session_id": session_id},
+            {"$set": {
+                "last_otp": otp_code,
+                "last_otp_time": datetime.utcnow()
+            }}
+        )
+
+        logger.info("DB Updated with new OTP")
+
+        bulk_index = session_data.get("bulk_index", 1)
+
+        # Get 2FA if exists
+        two_step_password = ""
+        account_id = session_data.get("account_id")
+        if account_id:
+            try:
+                account = accounts_col.find_one({"_id": ObjectId(account_id)})
+                if account:
+                    two_step_password = account.get("two_step_password", "")
+            except Exception as e:
+                logger.error(f"2FA fetch error: {e}")
+        
+        phone = session_data.get("phone", "N/A")
+        
+        updated_message = f"""✅ **OTP for Account #{bulk_index}** 
+
+📱 Phone: `{phone}`
+🔢 **OTP Code:** `{otp_code}`"""
+
+        if two_step_password:
+            updated_message += f"\n🔐 2FA Password: `{two_step_password}`"
+
+        updated_message += f"\n\n⏰ Time: {datetime.utcnow().strftime('%H:%M:%S')}"
+        updated_message += f"\n\nEnter this code in Telegram X app."
+        
+        markup = InlineKeyboardMarkup(row_width=2)
+        markup.add(
+            InlineKeyboardButton(f"🔄 Get OTP Again #{bulk_index}", callback_data=f"bulk_get_otp_again_{session_id}"),
+            InlineKeyboardButton(f"🚪 Logout #{bulk_index}", callback_data=f"bulk_logout_{session_id}")
+        )
+        
+        try:
+            bot.edit_message_text(
+                updated_message,
+                chat_id,
+                message_id,
+                parse_mode="Markdown",
+                reply_markup=markup
+            )
+            bot.answer_callback_query(callback_id, f"✅ OTP: {otp_code}", show_alert=True)
+            logger.info("Message edited successfully")
+            return
+
+        except Exception as e:
+            logger.error(f"Edit message error: {e}")
+            
+            try:
+                sent_msg = bot.send_message(
+                    chat_id,
+                    updated_message,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+
+                otp_sessions_col.update_one(
+                    {"session_id": session_id},
+                    {"$set": {"message_id": sent_msg.message_id}}
+                )
+
+                bot.answer_callback_query(callback_id, f"✅ OTP: {otp_code}", show_alert=True)
+                logger.info("New message sent successfully")
+
+            except Exception as e3:
+                logger.error(f"Final send error: {e3}")
+                bot.answer_callback_query(callback_id, "❌ Could not update message", show_alert=True)
+
+    except Exception as e:
+        logger.error(f"🔥 Bulk get OTP again fatal error: {e}")
+        bot.answer_callback_query(callback_id, f"❌ Error: {str(e)}", show_alert=True)
+
+def handle_bulk_logout(user_id, session_id, chat_id, message_id, callback_id):
+    """Handle logout for bulk account - then reveal next account"""
+    try:
+        if not account_manager:
+            bot.answer_callback_query(callback_id, "❌ Account module not loaded", show_alert=True)
+            return
+        
+        # Get session data
+        session_data = otp_sessions_col.find_one({"session_id": session_id})
+        if not session_data:
+            bot.answer_callback_query(callback_id, "❌ Session expired", show_alert=True)
+            return
+        
+        # Verify ownership
+        if session_data.get("user_id") != user_id:
+            bot.answer_callback_query(callback_id, "❌ Not your account", show_alert=True)
+            return
+        
+        bulk_index = session_data.get("bulk_index", 1)
+        phone = session_data.get("phone", "N/A")
+        
+        bot.answer_callback_query(callback_id, f"🔄 Logging out Account #{bulk_index}...", show_alert=False)
+        
+        # Perform logout
+        success, message = account_manager.logout_session_sync(
+            session_id, user_id, otp_sessions_col, accounts_col, orders_col
+        )
+        
+        if success:
+            # Update the message to show logged out
+            updated_message = f"""✅ **Account #{bulk_index} Logged Out**
+
+📱 Phone: `{phone}`
+🚪 Status: Logged out successfully
+
+This account is now completed."""
+            
+            markup = InlineKeyboardMarkup()
+            markup.add(InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu"))
+            
+            try:
+                bot.edit_message_text(
+                    updated_message,
+                    chat_id,
+                    message_id,
+                    parse_mode="Markdown",
+                    reply_markup=markup
+                )
+            except Exception as e:
+                logger.error(f"Edit logout message error: {e}")
+            
+            bot.answer_callback_query(
+                callback_id, 
+                f"✅ Logged out from Account #{bulk_index}", 
+                show_alert=True
+            )
+            
+            # After logout, reveal next account (if this was the current revealed account)
+            if user_id in user_orders:
+                current_revealed = user_orders[user_id]['current_revealed']
+                if bulk_index == current_revealed:
+                    reveal_next_bulk_account(user_id, chat_id, bulk_index)
+            
+        else:
+            bot.answer_callback_query(callback_id, f"❌ {message}", show_alert=True)
+            
+    except Exception as e:
+        logger.error(f"Bulk logout error: {e}")
+        bot.answer_callback_query(callback_id, f"❌ Error: {str(e)}", show_alert=True)
+
+def reveal_next_bulk_account(user_id, chat_id, current_index):
+    """Reveal the next account after getting OTP from current account"""
+    try:
+        if user_id not in user_orders:
+            return
+        
+        # Check if there are more accounts to reveal
+        if user_orders[user_id]['current_revealed'] >= user_orders[user_id]['quantity']:
+            return
+        
+        # Only reveal if this is the current revealed account
+        if current_index != user_orders[user_id]['current_revealed']:
+            return
+        
+        # Find next unrevealed account
+        next_index = current_index + 1
+        next_account = None
+        
+        for acc in user_orders[user_id]['accounts']:
+            if acc['index'] == next_index:
+                next_account = acc
+                break
+        
+        if not next_account:
+            return
+        
+        # Check if this account already has a message (shouldn't)
+        if next_account.get('message_id'):
+            return
+        
+        # Send message for next account
+        send_bulk_account_message(user_id, chat_id, next_account)
+        
+        # Update revealed counter
+        user_orders[user_id]['current_revealed'] = next_index
+        
+    except Exception as e:
+        logger.error(f"Reveal next account error: {e}")
+
+def show_my_accounts(user_id, chat_id, message_id):
+    """Show all active accounts for user"""
+    active_sessions = list(otp_sessions_col.find({
+        "user_id": user_id,
+        "status": "active"
+    }).sort("created_at", -1))
+    
+    if not active_sessions:
+        edit_or_resend(
+            chat_id,
+            message_id,
+            "📱 **Your Accounts**\n\nYou have no active accounts at the moment.",
+            markup=InlineKeyboardMarkup().add(
+                InlineKeyboardButton("🛒 Buy Account", callback_data="buy_account"),
+                InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu")
+            )
+        )
+        return
+    
+    text = f"📱 **Your Active Accounts ({len(active_sessions)})**\n\n"
+    markup = InlineKeyboardMarkup(row_width=2)
+    
+    for session in active_sessions:
+        phone = session.get('phone', 'N/A')
+        if session.get('bulk_total', 1) > 1:
+            display = f"#{session.get('bulk_index', 1)}: {phone[-8:]}"
+        else:
+            display = phone[-8:]
+        
+        text += f"• `{phone}` - {session.get('created_at', datetime.utcnow()).strftime('%H:%M')}\n"
+        markup.add(InlineKeyboardButton(
+            f"🔢 OTP {display}",
+            callback_data=f"bulk_get_otp_{session['session_id']}"
+        ))
+    
+    markup.add(InlineKeyboardButton("🏠 Main Menu", callback_data="back_to_menu"))
+    
+    edit_or_resend(
+        chat_id,
+        message_id,
+        text,
+        markup=markup,
+        parse_mode="Markdown"
+    )
+
+# =============================================================
+# END OF BULK BUY FUNCTIONS
+# =============================================================
+
 # ---------------------------------------------------------------------
-# BOT HANDLERS - UPDATED WITH TWO CHANNELS
+# BOT HANDLERS
 # ---------------------------------------------------------------------
 
 @bot.message_handler(commands=['start'])
@@ -1173,7 +1457,6 @@ def start(msg):
             pass
         return
     
-    # Check if user has joined BOTH channels
     if not has_user_joined_channels(user_id):
         missing_channels = get_missing_channels(user_id)
         
@@ -1187,7 +1470,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
         
         markup = InlineKeyboardMarkup(row_width=2)
         
-        # Add buttons for both channels
         for channel in missing_channels:
             markup.add(InlineKeyboardButton(
                 f"📢 Join {channel}",
@@ -1236,7 +1518,6 @@ def handle_callbacks(call):
     
     try:
         if data == "verify_join":
-            # Check if user has joined BOTH channels
             if has_user_joined_channels(user_id):
                 try:
                     bot.delete_message(call.message.chat.id, call.message.message_id)
@@ -1257,7 +1538,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 
                 markup = InlineKeyboardMarkup(row_width=2)
                 
-                # Add buttons for both channels
                 for channel in missing_channels:
                     markup.add(InlineKeyboardButton(
                         f"📢 Join {channel}",
@@ -1301,6 +1581,19 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 pass
             show_countries(call.message.chat.id)
         
+        elif data == "my_accounts":
+            if not has_user_joined_channels(user_id):
+                missing_channels = get_missing_channels(user_id)
+                missing_list = "\n".join([f"• {ch}" for ch in missing_channels])
+                bot.answer_callback_query(
+                    call.id, 
+                    f"❌ Please join:\n{missing_list}", 
+                    show_alert=True
+                )
+                start(call.message)
+                return
+            show_my_accounts(user_id, call.message.chat.id, call.message.message_id)
+        
         elif data == "balance":
             if not has_user_joined_channels(user_id):
                 missing_channels = get_missing_channels(user_id)
@@ -1324,7 +1617,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             message += f"• Commission Rate: {REFERRAL_COMMISSION}%\n\n"
             message += f"Your Referral Code: `{user_data.get('referral_code', 'REF' + str(user_id))}`"
             
-            # Sirf Send Balance aur Back button
             markup = InlineKeyboardMarkup(row_width=2)
             markup.add(
                 InlineKeyboardButton("📤 Send Balance", callback_data="send_balance_menu")
@@ -1365,7 +1657,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             message += f"Please enter the **Receiver's User ID**:\n"
             message += f"_(Only numeric ID, e.g., 123456789)_"
             
-            # Sirf Back button
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Back to Balance", callback_data="balance"))
             
@@ -1377,11 +1668,9 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 parse_mode="Markdown"
             )
             
-            # Set user state for user ID input
             user_stage[user_id] = "waiting_receiver_id"
         
         elif data == "transfer_confirm":
-            # Transfer confirmation screen
             transfer_data = user_states.get(user_id, {})
             if not transfer_data or "receiver_id" not in transfer_data or "amount" not in transfer_data:
                 bot.answer_callback_query(call.id, "❌ Session expired", show_alert=True)
@@ -1415,7 +1704,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             )
         
         elif data == "transfer_execute":
-            # Execute transfer
             transfer_data = user_states.get(user_id, {})
             if not transfer_data or "receiver_id" not in transfer_data or "amount" not in transfer_data:
                 bot.answer_callback_query(call.id, "❌ Session expired", show_alert=True)
@@ -1429,18 +1717,15 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             success, message_text = transfer_balance(user_id, receiver_id, amount)
             
             if success:
-                # Get updated balances
                 sender_new_balance = get_balance(user_id)
                 receiver_new_balance = get_balance(receiver_id)
                 
-                # Message for sender
                 sender_message = f"✅ **Transfer Successful!**\n\n"
                 sender_message += f"👤 Sent to: {receiver_name}\n"
                 sender_message += f"🆔 Receiver ID: `{receiver_id}`\n"
                 sender_message += f"💰 Amount Sent: {format_currency(amount)}\n"
                 sender_message += f"💳 Your New Balance: {format_currency(sender_new_balance)}\n\n"
                 
-                # Sirf Back to Balance button
                 markup = InlineKeyboardMarkup()
                 markup.add(InlineKeyboardButton("⬅️ Back to Balance", callback_data="balance"))
                 
@@ -1452,9 +1737,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                     parse_mode="Markdown"
                 )
                 
-                # Send notification to receiver
                 try:
-                    # Get sender name
                     sender = users_col.find_one({"user_id": user_id})
                     sender_name = sender.get("name", "Unknown") if sender else "Unknown"
                     
@@ -1464,7 +1747,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                     receiver_message += f"💰 Amount Received: {format_currency(amount)}\n"
                     receiver_message += f"💳 Your New Balance: {format_currency(receiver_new_balance)}\n\n"
                     
-                    # Sirf Close button for receiver
                     receiver_markup = InlineKeyboardMarkup()
                     receiver_markup.add(InlineKeyboardButton("❌ Close", callback_data="back_to_menu"))
                     
@@ -1478,7 +1760,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                     logger.warning(f"Could not notify receiver {receiver_id}: {e}")
                 
             else:
-                # Transfer failed
                 markup = InlineKeyboardMarkup()
                 markup.add(
                     InlineKeyboardButton("🔄 Try Again", callback_data="send_balance_menu"),
@@ -1493,7 +1774,6 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                     parse_mode="Markdown"
                 )
             
-            # Clear transfer state
             if user_id in user_states:
                 user_states.pop(user_id, None)
             if user_id in user_stage:
@@ -1573,7 +1853,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 start(call.message)
                 return
             
-            msg_text = "🛠️ Support: @k4un_hu_mai"
+            msg_text = "🛠️ Support: @Btw_Hunter"
             markup = InlineKeyboardMarkup()
             markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_to_menu"))
             
@@ -1727,6 +2007,55 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             country_name = data.replace("country_raw_", "")
             show_country_details(user_id, country_name, call.message.chat.id, call.message.message_id, call.id)
         
+        # Bulk buy callbacks
+        elif data.startswith("bulk_buy_"):
+            if not has_user_joined_channels(user_id):
+                missing_channels = get_missing_channels(user_id)
+                missing_list = "\n".join([f"• {ch}" for ch in missing_channels])
+                bot.answer_callback_query(
+                    call.id, 
+                    f"❌ Please join:\n{missing_list}", 
+                    show_alert=True
+                )
+                start(call.message)
+                return
+            
+            country_name = data.replace("bulk_buy_", "")
+            show_bulk_buy_options(call.message.chat.id, call.message.message_id, user_id, country_name)
+        
+        elif data == "bulk_confirm":
+            if user_id in bulk_buy_states and bulk_buy_states[user_id].get("step") == "confirm":
+                process_bulk_purchase(user_id, call.message.chat.id, call.message.message_id)
+            else:
+                bot.answer_callback_query(call.id, "❌ Session expired", show_alert=True)
+        
+        elif data.startswith("bulk_change_"):
+            if not has_user_joined_channels(user_id):
+                missing_channels = get_missing_channels(user_id)
+                missing_list = "\n".join([f"• {ch}" for ch in missing_channels])
+                bot.answer_callback_query(
+                    call.id, 
+                    f"❌ Please join:\n{missing_list}", 
+                    show_alert=True
+                )
+                start(call.message)
+                return
+            
+            country_name = data.replace("bulk_change_", "")
+            show_bulk_buy_options(call.message.chat.id, call.message.message_id, user_id, country_name)
+        
+        elif data.startswith("bulk_get_otp_"):
+            session_id = data.replace("bulk_get_otp_", "")
+            handle_bulk_get_otp(user_id, session_id, call.message.chat.id, call.message.message_id, call.id)
+        
+        elif data.startswith("bulk_get_otp_again_"):
+            session_id = data.replace("bulk_get_otp_again_", "")
+            handle_bulk_get_otp_again(user_id, session_id, call.message.chat.id, call.message.message_id, call.id)
+        
+        elif data.startswith("bulk_logout_"):
+            session_id = data.replace("bulk_logout_", "")
+            handle_bulk_logout(user_id, session_id, call.message.chat.id, call.message.message_id, call.id)
+        
         elif data.startswith("buy_"):
             if not has_user_joined_channels(user_id):
                 missing_channels = get_missing_channels(user_id)
@@ -1855,35 +2184,67 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
                 parts = data.split("|")
                 action = parts[0]
                 req_id = parts[1] if len(parts) > 1 else None
+                req = recharges_col.find_one({"req_id": req_id}) if req_id else None
                 
-                # Process approval/rejection
-                success, message, admin_info = process_recharge_approval(user_id, req_id, 
-                                                                        "approve" if action == "approve_rech" else "reject")
+                if not req:
+                    bot.answer_callback_query(call.id, "❌ Request not found", show_alert=True)
+                    return
                 
-                if success:
-                    bot.answer_callback_query(call.id, message, show_alert=True)
+                user_target = req.get("user_id")
+                amount = float(req.get("amount", 0))
+                
+                if action == "approve_rech":
+                    add_balance(user_target, amount)
+                    recharges_col.update_one(
+                        {"req_id": req_id},
+                        {"$set": {"status": "approved", "processed_at": datetime.utcnow(), "processed_by": ADMIN_ID}}
+                    )
+                    bot.answer_callback_query(call.id, "✅ Recharge approved", show_alert=True)
                     
-                    # Delete the original admin message
+                    try:
+                        from logs import log_recharge_approved_async
+                        log_recharge_approved_async(
+                            user_id=user_target,
+                            amount=amount,
+                            method="UPI",
+                            utr=req.get("utr")
+                        )
+                    except:
+                        pass
+                    
+                    user_data = users_col.find_one({"user_id": user_target})
+                    if user_data and user_data.get("referred_by"):
+                        add_referral_commission(user_data["referred_by"], amount, req)
+                    
+                    kb = InlineKeyboardMarkup()
+                    kb.add(InlineKeyboardButton("🛒 Buy Account Now", callback_data="buy_account"))
+                    
                     try:
                         bot.delete_message(call.message.chat.id, call.message.message_id)
                     except:
                         pass
                     
-                    # Send new message showing which admin approved/rejected
-                    admin_action_msg = f"✅ **Recharge Request Processed**\n\n"
-                    admin_action_msg += f"📋 Request ID: `{req_id}`\n"
-                    admin_action_msg += f"👤 Processed by: {admin_info['admin_name']}\n"
-                    admin_action_msg += f"🆔 Admin ID: `{admin_info['admin_id']}`\n"
-                    admin_action_msg += f"📌 Action: **{admin_info['action'].upper()}**\n"
-                    admin_action_msg += f"⏰ Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')}"
-                    
                     bot.send_message(
-                        call.message.chat.id,
-                        admin_action_msg,
-                        parse_mode="Markdown"
+                        user_target,
+                        f"✅ Your recharge of {format_currency(amount)} has been approved and added to your wallet.\n\n"
+                        f"💰 <b>New Balance: {format_currency(get_balance(user_target))}</b>\n\n"
+                        f"Click below to buy accounts:",
+                        parse_mode="HTML",
+                        reply_markup=kb
                     )
                 else:
-                    bot.answer_callback_query(call.id, f"❌ {message}", show_alert=True)
+                    recharges_col.update_one(
+                        {"req_id": req_id},
+                        {"$set": {"status": "cancelled", "processed_at": datetime.utcnow(), "processed_by": ADMIN_ID}}
+                    )
+                    bot.answer_callback_query(call.id, "❌ Recharge cancelled", show_alert=True)
+                    
+                    try:
+                        bot.delete_message(call.message.chat.id, call.message.message_id)
+                    except:
+                        pass
+                    
+                    bot.send_message(user_target, f"❌ Your recharge of {format_currency(amount)} was not received.")
             else:
                 bot.answer_callback_query(call.id, "❌ Unauthorized", show_alert=True)
         
@@ -2126,7 +2487,7 @@ Click the buttons below to join both channels, then press VERIFY ✅"""
             pass
 
 # ---------------------------------------------------------------------
-# BULK ACCOUNT FUNCTIONS
+# BULK ACCOUNT FUNCTIONS (Admin)
 # ---------------------------------------------------------------------
 
 def handle_cancel_bulk(call):
@@ -2641,7 +3002,6 @@ def get_latest_otp(user_id, session_id, chat_id, callback_id):
             bot.answer_callback_query(callback_id, "❌ Session not found", show_alert=True)
             return
         
-        # ALWAYS fetch fresh OTP, don't use cached
         bot.answer_callback_query(callback_id, "🔍 Searching for latest OTP...", show_alert=False)
         
         session_string = session_data.get("session_string")
@@ -2649,14 +3009,12 @@ def get_latest_otp(user_id, session_id, chat_id, callback_id):
             bot.answer_callback_query(callback_id, "❌ No session string found", show_alert=True)
             return
         
-        # Always fetch new OTP
         otp_code = account_manager.get_latest_otp_sync(session_string)
         
         if not otp_code:
             bot.answer_callback_query(callback_id, "❌ No OTP received yet. Please wait...", show_alert=True)
             return
         
-        # Update database with the new OTP
         otp_sessions_col.update_one(
             {"session_id": session_id},
             {"$set": {
@@ -3054,16 +3412,14 @@ def handle_coupon_status_input(msg):
     coupon_state.pop(user_id, None)
 
 # ---------------------------------------------------------------------
-# RECHARGE METHODS FUNCTIONS - UPDATED WITH TOTAL AND TODAY RECHARGE
+# RECHARGE METHODS FUNCTIONS
 # ---------------------------------------------------------------------
 
 def show_recharge_methods(chat_id, message_id, user_id):
-    # Calculate total recharge and today's recharge for this user
     total_recharge = 0
     today_recharge = 0
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     
-    # Get all approved recharges for this user
     user_recharges = recharges_col.find({
         "user_id": user_id,
         "status": "approved"
@@ -3073,7 +3429,6 @@ def show_recharge_methods(chat_id, message_id, user_id):
         amount = float(recharge.get("amount", 0))
         total_recharge += amount
         
-        # Check if recharge was done today
         recharge_date = recharge.get("created_at") or recharge.get("submitted_at")
         if recharge_date and recharge_date >= today_start:
             today_recharge += amount
@@ -3098,7 +3453,7 @@ def show_recharge_methods(chat_id, message_id, user_id):
     )
 
 # ---------------------------------------------------------------------
-# PROCESS RECHARGE AMOUNT FUNCTION - FIXED DATABASE ISSUE
+# PROCESS RECHARGE AMOUNT FUNCTION
 # ---------------------------------------------------------------------
 
 def process_recharge_amount(msg):
@@ -3133,7 +3488,7 @@ def process_recharge_amount(msg):
         
         bot.send_photo(
             msg.chat.id,
-            "https://files.catbox.moe/x6666i.jpg",
+            "https://files.catbox.moe/zq4zoj.jpg",
             caption=caption,
             parse_mode="HTML",
             reply_markup=markup
@@ -3142,7 +3497,6 @@ def process_recharge_amount(msg):
         bot.send_message(msg.chat.id, "❌ Invalid amount. Enter numbers only:")
         bot.register_next_step_handler(msg, process_recharge_amount)
 
-# FIXED UTR HANDLER - Now properly checks and stores in database
 @bot.message_handler(func=lambda m: upi_payment_states.get(m.from_user.id, {}).get("step") == "waiting_utr")
 def handle_utr_input(msg):
     user_id = msg.from_user.id
@@ -3156,7 +3510,6 @@ def handle_utr_input(msg):
         bot.send_message(msg.chat.id, "❌ Invalid UTR. Please enter a valid 12-digit UTR number:")
         return
     
-    # Store UTR and move to screenshot step
     upi_payment_states[user_id]["utr"] = utr
     upi_payment_states[user_id]["step"] = "waiting_screenshot"
     
@@ -3168,7 +3521,6 @@ def handle_utr_input(msg):
         "_(Make sure screenshot shows amount, date, and UTR)_"
     )
 
-# FIXED SCREENSHOT HANDLER - Now properly saves to database
 @bot.message_handler(content_types=['photo'], func=lambda m: upi_payment_states.get(m.from_user.id, {}).get("step") == "waiting_screenshot")
 def handle_screenshot_input(msg):
     user_id = msg.from_user.id
@@ -3182,10 +3534,8 @@ def handle_screenshot_input(msg):
         amount = upi_payment_states[user_id]["amount"]
         utr = upi_payment_states[user_id].get("utr", "")
         
-        # Generate unique request ID
         req_id = f"R{int(time.time())}{user_id}"
         
-        # Save to database with proper fields
         recharge_data = {
             "user_id": user_id,
             "amount": amount,
@@ -3200,14 +3550,10 @@ def handle_screenshot_input(msg):
         
         recharge_id = recharges_col.insert_one(recharge_data).inserted_id
         
-        # Update with req_id
         recharges_col.update_one(
             {"_id": ObjectId(recharge_id)},
             {"$set": {"req_id": req_id}}
         )
-        
-        # Get all admins to send notification
-        all_admins = get_all_admins()
         
         admin_caption = f"""📋 **UPI Payment Request** 
 
@@ -3225,19 +3571,13 @@ def handle_screenshot_input(msg):
             InlineKeyboardButton("❌ Reject", callback_data=f"cancel_rech|{req_id}")
         )
         
-        # Send to all admins
-        for admin in all_admins:
-            admin_user_id = admin["user_id"]
-            try:
-                bot.send_photo(
-                    admin_user_id,
-                    screenshot_file_id,
-                    caption=admin_caption,
-                    parse_mode="HTML",
-                    reply_markup=markup
-                )
-            except Exception as e:
-                logger.error(f"Failed to send recharge notification to admin {admin_user_id}: {e}")
+        bot.send_photo(
+            ADMIN_ID,
+            screenshot_file_id,
+            caption=admin_caption,
+            parse_mode="HTML",
+            reply_markup=markup
+        )
         
         bot.send_message(
             msg.chat.id,
@@ -3251,7 +3591,6 @@ def handle_screenshot_input(msg):
             f"Admin will review and approve soon. Thank you! 🎉"
         )
         
-        # Clear state after successful submission
         upi_payment_states.pop(user_id, None)
         
     except Exception as e:
@@ -3259,7 +3598,7 @@ def handle_screenshot_input(msg):
         bot.send_message(msg.chat.id, f"❌ Error submitting payment: {str(e)}")
 
 # =============================================================
-# RECEIVER ID INPUT HANDLER - FIXED NAME DISPLAY
+# RECEIVER ID INPUT HANDLER
 # =============================================================
 
 @bot.message_handler(func=lambda m: user_stage.get(m.from_user.id) == "waiting_receiver_id")
@@ -3272,7 +3611,6 @@ def handle_receiver_id(msg):
     try:
         receiver_id = int(msg.text.strip())
         
-        # Check if receiver exists in database
         receiver = users_col.find_one({"user_id": receiver_id})
         if not receiver:
             bot.send_message(
@@ -3282,7 +3620,6 @@ def handle_receiver_id(msg):
             )
             return
         
-        # Get receiver's name - properly formatted
         receiver_name = receiver.get("name", "Unknown")
         receiver_username = receiver.get("username", "")
         
@@ -3291,13 +3628,11 @@ def handle_receiver_id(msg):
         else:
             receiver_display = receiver_name
         
-        # Store receiver info in user_states
         user_states[user_id] = {
             "receiver_id": receiver_id,
             "receiver_name": receiver_display
         }
         
-        # Move to amount input
         user_stage[user_id] = "waiting_transfer_amount"
         
         balance = get_balance(user_id)
@@ -3342,7 +3677,6 @@ def handle_transfer_amount(msg):
     try:
         amount = float(msg.text.strip())
         
-        # Get stored data
         transfer_data = user_states.get(user_id, {})
         receiver_id = transfer_data.get("receiver_id")
         receiver_name = transfer_data.get("receiver_name", f"ID: {receiver_id}")
@@ -3353,7 +3687,6 @@ def handle_transfer_amount(msg):
             user_states.pop(user_id, None)
             return
         
-        # Validate amount
         if amount <= 0:
             bot.send_message(msg.chat.id, "❌ Amount must be greater than 0!\nPlease enter valid amount:")
             return
@@ -3366,11 +3699,9 @@ def handle_transfer_amount(msg):
             )
             return
         
-        # Update transfer data with amount
         transfer_data["amount"] = amount
         user_states[user_id] = transfer_data
         
-        # Show confirmation
         confirm_message = f"📤 **Confirm Transfer**\n\n"
         confirm_message += f"👤 Receiver: {receiver_name}\n"
         confirm_message += f"🆔 Receiver ID: `{receiver_id}`\n"
@@ -3403,6 +3734,15 @@ def handle_transfer_amount(msg):
     except Exception as e:
         logger.error(f"Transfer amount error: {e}")
         bot.send_message(msg.chat.id, f"❌ Error: {str(e)}")
+
+# =============================================================
+# BULK BUY MESSAGE HANDLER
+# =============================================================
+
+@bot.message_handler(func=lambda m: bulk_buy_states.get(m.from_user.id, {}).get("step") == "waiting_quantity")
+def handle_bulk_quantity_input(msg):
+    user_id = msg.from_user.id
+    process_bulk_quantity_input(msg)
 
 # ---------------------------------------------------------------------
 # EDIT PRICE FUNCTIONS
@@ -3790,7 +4130,6 @@ def show_admin_panel(chat_id):
     total_orders = orders_col.count_documents({})
     banned_users = banned_users_col.count_documents({"status": "active"})
     active_countries = countries_col.count_documents({"status": "active"})
-    total_admins = get_admin_count()
     
     text = (
         f"👑 **Admin Panel**\n\n"
@@ -3800,8 +4139,7 @@ def show_admin_panel(chat_id):
         f"• Total Users: {total_users}\n"
         f"• Total Orders: {total_orders}\n"
         f"• Banned Users: {banned_users}\n"
-        f"• Active Countries: {active_countries}\n"
-        f"• Total Admins: {total_admins}/6\n\n"
+        f"• Active Countries: {active_countries}\n\n"
         f"🛠️ **Management Tools:**"
     )
     
@@ -3826,17 +4164,6 @@ def show_admin_panel(chat_id):
         InlineKeyboardButton("🌍 Manage Countries", callback_data="manage_countries"),
         InlineKeyboardButton("🎟 Coupon Management", callback_data="admin_coupon_menu")
     )
-    
-    # Show admin list for main admin
-    if is_super_admin(user_id):
-        admins = get_all_admins()
-        admin_text = "\n\n👥 **Current Admins:**\n"
-        for admin in admins:
-            if admin.get("is_super_admin", False):
-                admin_text += f"👑 Main: `{admin['user_id']}`\n"
-            else:
-                admin_text += f"👤 Admin: `{admin['user_id']}`\n"
-        text += admin_text
     
     sent_msg = bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
     user_last_message[user_id] = sent_msg.message_id
@@ -4000,7 +4327,7 @@ def ask_ban_user(message):
                 user_id_to_ban,
                 "🚫 **Your Account Has Been Banned**\n\n"
                 "You have been banned from using this bot.\n"
-                "Contact admin @DHRUV_PAPAHERE if you believe this is a mistake."
+                "Contact admin @Btw_Hunter if you believe this is a mistake."
             )
         except:
             pass
@@ -4081,12 +4408,11 @@ def show_user_ranking(chat_id):
         bot.send_message(chat_id, f"❌ Error generating ranking: {str(e)}")
 
 # ---------------------------------------------------------------------
-# BROADCAST FUNCTION - PERFECT FORWARD (PURE TELEBOT)
+# BROADCAST FUNCTION
 # ---------------------------------------------------------------------
 
 @bot.message_handler(commands=['sendbroadcast'])
 def handle_sendbroadcast_command(msg):
-    """Handle /sendbroadcast command - EXACT FORWARD"""
     global IS_BROADCASTING
     
     if not is_admin(msg.from_user.id):
@@ -4111,7 +4437,6 @@ def handle_sendbroadcast_command(msg):
         )
         return
     
-    # Parse options
     cmd_text = msg.text.lower()
     pin_silent = '-pin' in cmd_text and '-pinloud' not in cmd_text
     pin_loud = '-pinloud' in cmd_text
@@ -4119,7 +4444,6 @@ def handle_sendbroadcast_command(msg):
     
     source = msg.reply_to_message
     
-    # Send confirmation
     status_msg = bot.send_message(
         msg.chat.id,
         f"📡 **Broadcast Started**\n\n"
@@ -4133,7 +4457,6 @@ def handle_sendbroadcast_command(msg):
     
     IS_BROADCASTING = True
     
-    # Start broadcast thread
     threading.Thread(
         target=broadcast_worker,
         args=(
@@ -4149,22 +4472,18 @@ def handle_sendbroadcast_command(msg):
     ).start()
 
 def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat_id, status_msg_id, admin_id):
-    """Broadcast worker - EXACT FORWARD to all groups and users"""
     global IS_BROADCASTING
     
     try:
-        # Get all unique chat IDs from database
         all_chats = []
         chat_ids = set()
         
-        # 1. Get all users (negative IDs are groups)
         all_users = list(users_col.find())
         for user in all_users:
             uid = user.get("user_id")
             if uid and uid != ADMIN_ID and uid != admin_id:
                 chat_ids.add(uid)
         
-        # 2. Get all served chats if collection exists
         try:
             if 'served_chats' in db.list_collection_names():
                 served = db['served_chats'].find()
@@ -4177,11 +4496,9 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
         
         all_chats = list(chat_ids)
         
-        # Separate groups and users
         groups = [cid for cid in all_chats if str(cid).startswith('-')]
         users = [cid for cid in all_chats if not str(cid).startswith('-') and cid != ADMIN_ID and cid != admin_id]
         
-        # Update status
         bot.edit_message_text(
             f"📡 **Broadcasting to Groups...**\n\n"
             f"👥 Total Groups: {len(groups)}",
@@ -4190,14 +4507,12 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
             parse_mode="Markdown"
         )
         
-        # ----- BROADCAST TO GROUPS -----
         groups_sent = 0
         groups_pinned = 0
         groups_failed = 0
         
         for chat_id in groups:
             try:
-                # EXACT FORWARD - Telegram API ka original forward
                 forwarded_msg = bot.forward_message(
                     chat_id,
                     source_msg.chat.id,
@@ -4205,7 +4520,6 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
                 )
                 groups_sent += 1
                 
-                # Pin if option enabled
                 if pin_silent or pin_loud:
                     try:
                         bot.pin_chat_message(
@@ -4217,7 +4531,6 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
                     except:
                         pass
                 
-                # Update progress every 10 messages
                 if groups_sent % 10 == 0:
                     bot.edit_message_text(
                         f"📡 **Broadcasting...**\n\n"
@@ -4228,14 +4541,13 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
                         parse_mode="Markdown"
                     )
                 
-                time.sleep(0.25)  # Anti-flood
+                time.sleep(0.25)
                 
             except Exception as e:
                 groups_failed += 1
                 logger.error(f"Group broadcast failed for {chat_id}: {e}")
                 continue
         
-        # ----- BROADCAST TO USERS (if option enabled) -----
         users_sent = 0
         users_failed = 0
         
@@ -4251,7 +4563,6 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
             
             for user_id in users:
                 try:
-                    # EXACT FORWARD to users
                     bot.forward_message(
                         user_id,
                         source_msg.chat.id,
@@ -4259,7 +4570,6 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
                     )
                     users_sent += 1
                     
-                    # Update progress every 20 users
                     if users_sent % 20 == 0:
                         bot.edit_message_text(
                             f"📡 **Broadcasting to Users...**\n\n"
@@ -4269,14 +4579,13 @@ def broadcast_worker(source_msg, pin_silent, pin_loud, send_to_users, admin_chat
                             parse_mode="Markdown"
                         )
                     
-                    time.sleep(0.2)  # Anti-flood
+                    time.sleep(0.2)
                     
                 except Exception as e:
                     users_failed += 1
                     logger.error(f"User broadcast failed for {user_id}: {e}")
                     continue
         
-        # ----- FINAL REPORT -----
         report = (
             f"🎯 **Broadcast Completed!**\n\n"
             f"📊 **Groups:**\n"
@@ -4457,21 +4766,37 @@ def show_country_details(user_id, country_name, chat_id, message_id, callback_id
         
         markup = InlineKeyboardMarkup(row_width=2)
         
+        # NEW: Single and Bulk options
         if accounts_count > 0:
             accounts = list(accounts_col.find({
                 "country": country_name,
                 "status": "active",
                 "used": False
             }))
-            markup.add(InlineKeyboardButton(
-                "🛒 Buy Account",
-                callback_data=f"buy_{accounts[0]['_id']}" if accounts else "out_of_stock"
-            ))
+            
+            # Single Buy Button
+            if accounts:
+                markup.add(InlineKeyboardButton(
+                    "🛒 Single Buy",
+                    callback_data=f"buy_{accounts[0]['_id']}"
+                ))
+            
+            # Bulk Buy Button (only if enough stock)
+            if accounts_count >= 2:
+                markup.add(InlineKeyboardButton(
+                    f"📦 Bulk Buy (2-{min(30, accounts_count)})",
+                    callback_data=f"bulk_buy_{country_name}"
+                ))
+            else:
+                markup.add(InlineKeyboardButton(
+                    "📦 Bulk Buy (Out of Stock)",
+                    callback_data="out_of_stock"
+                ))
         else:
-            markup.add(InlineKeyboardButton(
-                "🛒 Buy Account",
-                callback_data="out_of_stock"
-            ))
+            markup.add(
+                InlineKeyboardButton("🛒 Single Buy", callback_data="out_of_stock"),
+                InlineKeyboardButton("📦 Bulk Buy", callback_data="out_of_stock")
+            )
         
         markup.add(InlineKeyboardButton("⬅️ Back", callback_data="back_to_countries"))
         
@@ -4596,7 +4921,7 @@ def process_purchase(user_id, account_id, chat_id, message_id, callback_id):
 
 🌍 Country: {account['country']}
 💸 Price: {format_currency(price)}
-📱 Phone Number: {account.get('phone', 'N/A')}"""
+📱 Phone Number: `{account.get('phone', 'N/A')}`"""
         
         if account.get('two_step_password'):
             account_details += f"\n🔒 2FA Password: `{account.get('two_step_password', 'N/A')}`"
@@ -4634,7 +4959,7 @@ def process_purchase(user_id, account_id, chat_id, message_id, callback_id):
             pass
 
 # =============================================================
-# RESTART COMMAND (VPS + HEROKU SAFE)
+# RESTART COMMAND
 # =============================================================
 
 @bot.message_handler(commands=['restart'])
@@ -4651,7 +4976,6 @@ def restart_bot(message):
 
     time.sleep(1)
 
-    # Clean restart
     os.execv(sys.executable, ['python'] + sys.argv)
 
 # ---------------------------------------------------------------------
@@ -4661,16 +4985,6 @@ def restart_bot(message):
 @bot.message_handler(func=lambda m: True, content_types=['text','photo','video','document'])
 def chat_handler(msg):
     user_id = msg.from_user.id
-    
-    # Check if user is in admin add flow
-    if user_id in admin_add_state:
-        handle_add_admin_userid(msg)
-        return
-    
-    # Check if user is in admin remove flow
-    if user_id in admin_remove_state:
-        handle_remove_admin_userid(msg)
-        return
     
     if user_id == ADMIN_ID and user_id in admin_deduct_state:
         pass
@@ -4808,7 +5122,7 @@ def chat_handler(msg):
 # ---------------------------------------------------------------------
 
 if __name__ == "__main__":
-    logger.info(f"🤖 Fixed OTP Bot Starting...")
+    logger.info(f"🤖 Fixed OTP Bot Starting with BULK BUY Feature...")
     logger.info(f"Admin ID: {ADMIN_ID}")
     logger.info(f"Bot Token: {BOT_TOKEN[:10]}...")
     logger.info(f"Global API ID: {GLOBAL_API_ID}")
@@ -4827,15 +5141,8 @@ if __name__ == "__main__":
         logger.error(f"❌ Failed to create coupon indexes: {e}")
     
     try:
-        admins_col.create_index([("user_id", 1)], unique=True)
-        logger.info("✅ Admin indexes created")
-    except Exception as e:
-        logger.error(f"❌ Failed to create admin indexes: {e}")
-    
-    try:
         bot.infinity_polling(timeout=60, long_polling_timeout=60)
     except Exception as e:
         logger.error(f"Bot error: {e}")
         time.sleep(30)
         bot.infinity_polling(timeout=60, long_polling_timeout=60)
-
