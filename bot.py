@@ -39,16 +39,16 @@ from pyrogram.errors import (
 # CONFIG
 # ---------------------------------------------------------------------
 
-BOT_TOKEN = os.getenv('BOT_TOKEN', '8758505666:AAElWp1mZQlOHd3xOCKakQYRCiIXKrT9igQ')
-ADMIN_ID = int(os.getenv('ADMIN_ID', '8575496524'))
+BOT_TOKEN = os.getenv('BOT_TOKEN', '8694746907:AAG5FXJaS4TbZAMw81r01kzjHfGJ_2G6A2Y')
+ADMIN_ID = int(os.getenv('ADMIN_ID', '6457854684'))
 MONGO_URL = os.getenv('MONGO_URL', ''mongodb+srv://ADIAZAZ67889:ADIAZAZ67889@cluster0.rr1kvuw.mongodb.net/?appName=Cluster0')
 API_ID = int(os.getenv('API_ID', '36330071'))
 API_HASH = os.getenv('API_HASH', '7cf95f082395bcf3d2e7c4a4a27f3ef5')
 
 # MUST JOIN CHANNELS
-MUST_JOIN_CHANNEL_1 = "@ADI_OTP_SUPPORT"
-MUST_JOIN_CHANNEL_2 = "@ADI_SUPPORT_GROUP"
-LOG_CHANNEL_ID = "-1003557056482"
+MUST_JOIN_CHANNEL_1 = "@SPIDER_OTP_SUPPORT"
+MUST_JOIN_CHANNEL_2 = "@SPIDER_OTP_SUPPORT"
+LOG_CHANNEL_ID = "-1003934183721"
 
 # Referral commission percentage
 REFERRAL_COMMISSION = 1.5
@@ -508,7 +508,7 @@ def clean_ui_and_send_menu(chat_id, user_id, text=None, markup=None):
                 pass
         
         caption = (
-            "🥂 <b>Welcome To Otp Bot By Adi </b> 🥂\n"
+            "🥂 <b>Welcome To Otp Bot By Cute And Haggu </b> 🥂\n"
             "<blockquote expandable>\n"
             "- Automatic OTPs 📍\n"
             "- Easy to Use 🥂🥂\n"
